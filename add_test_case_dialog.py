@@ -26,6 +26,7 @@ class AddTestCaseDialog(QDialog):
 
         # 初始化预设测试代码数据库
         self.init_preset_base_test_db()
+        self.init_preset_constraint_test_db()
         self.init_preset_transaction_test_db()
 
         # 设置对话框标题和大小
@@ -94,22 +95,39 @@ class AddTestCaseDialog(QDialog):
         # 将按钮布局添加到表单布局中
         layout.addRow(button_layout)
 
-        """初始化UI并根据数据库动态创建按钮 - transaction"""
+        """初始化UI并根据数据库动态创建按钮 - constraint"""
         # 创建一个 QHBoxLayout 将按钮横向排列
         button_layout2 = QHBoxLayout()
-        button_layout2.addWidget(QLabel("Transaction test:"))  # 添加文本
+        button_layout2.addWidget(QLabel("Constraint test:"))  # 添加文本
 
         # 从数据库加载按钮名称并动态创建按钮
-        button_names2 = self.load_button_names_from_db(self.preset_transaction_test_cursor)
+        button_names2 = self.load_button_names_from_db(self.preset_constraint_test_cursor)
 
         # 为每个按钮创建并连接事件
         for name in button_names2:
             button = QPushButton(name, self)
-            button.clicked.connect(lambda _, btn_name=name: self.handle_button_click(self.preset_transaction_test_cursor, btn_name))
+            button.clicked.connect(lambda _, btn_name=name: self.handle_button_click(self.preset_constraint_test_cursor, btn_name))
             button_layout2.addWidget(button)
 
         # 将按钮布局添加到表单布局中
         layout.addRow(button_layout2)
+
+        """初始化UI并根据数据库动态创建按钮 - transaction"""
+        # 创建一个 QHBoxLayout 将按钮横向排列
+        button_layout3 = QHBoxLayout()
+        button_layout3.addWidget(QLabel("Transaction test:"))  # 添加文本
+
+        # 从数据库加载按钮名称并动态创建按钮
+        button_names3 = self.load_button_names_from_db(self.preset_transaction_test_cursor)
+
+        # 为每个按钮创建并连接事件
+        for name in button_names3:
+            button = QPushButton(name, self)
+            button.clicked.connect(lambda _, btn_name=name: self.handle_button_click(self.preset_transaction_test_cursor, btn_name))
+            button_layout3.addWidget(button)
+
+        # 将按钮布局添加到表单布局中
+        layout.addRow(button_layout3)
 
         # 测试用例代码输入框
         self.test_case_code = QTextEdit(self)
@@ -248,6 +266,119 @@ class AddTestCaseDialog(QDialog):
                         cursor.close()''')
             ])
             self.preset_base_test_conn.commit()
+
+    def init_preset_constraint_test_db(self):
+        """初始化 SQLite 数据库并创建表"""
+        # 连接数据库（如果不存在会自动创建）
+        self.preset_constraint_test_conn = sqlite3.connect("preset_constraint_test.db")
+        self.preset_constraint_test_cursor = self.preset_constraint_test_conn.cursor()
+
+        # 创建存储按钮名称和代码的表
+        self.preset_constraint_test_cursor.execute('''
+            CREATE TABLE IF NOT EXISTS buttons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                code TEXT NOT NULL
+            )
+        ''')
+        self.preset_constraint_test_conn.commit()
+
+        # 插入一些按钮名称和对应的代码到数据库（仅在表为空时插入）
+        self.preset_constraint_test_cursor.execute('SELECT COUNT(*) FROM buttons')
+        if self.preset_constraint_test_cursor.fetchone()[0] == 0:
+            self.preset_constraint_test_cursor.executemany('''
+                INSERT INTO buttons (name, code) VALUES (?, ?)
+            ''', [
+                ("primary_key_constraint", '''
+                    def test_primary_key_constraint(mysql_connection):
+                        """测试主键约束"""
+                        cursor = mysql_connection.cursor()
+
+                        # 开始事务
+                        mysql_connection.start_transaction()
+
+                        try:
+                            # 1. 插入一个有效的记录，主键 Sid 为 '001'
+                            cursor.execute("""
+                                INSERT INTO Student (Sid, Sname, Sgender, Sbirthday, Sclass)
+                                VALUES ('001', '张三', '男', '2000-01-01', 'A1')
+                            """)
+                            # 查询插入的数据
+                            cursor.execute("SELECT COUNT(*) FROM Student WHERE Sid = '001' AND Sname = '张三' AND Sgender = '男' AND Sbirthday = '2000-01-01' AND Sclass = 'A1'")
+                            count = cursor.fetchone()[0]
+
+                            # 验证数据是否成功插入
+                            assert count == 1
+
+                            # 2. 尝试插入一个具有相同 Sid 的记录，应该抛出错误
+                            try:
+                                cursor.execute("""
+                                    INSERT INTO Student (Sid, Sname, Sgender, Sbirthday, Sclass)
+                                    VALUES ('001', '李四', '女', '1999-12-12', 'A2')
+                                """)
+                                pytest.fail("应该抛出错误，因为主键 Sid 重复")
+                            except Error as e:
+                                assert "Duplicate entry" in str(e)  # 主键重复错误
+
+                            # 3. 尝试插入一个没有 Sid 值的记录，应该抛出错误，因为 Sid 不能为空
+                            try:
+                                cursor.execute("""
+                                    INSERT INTO Student (Sid, Sname, Sgender, Sbirthday, Sclass)
+                                    VALUES (NULL, '王五', '男', '1998-05-05', 'B1')
+                                """)
+                                pytest.fail("应该抛出错误，因为 Sid 不能为空")
+                            except Error as e:
+                                assert "Column 'Sid' cannot be null" in str(e)  # Sid 不能为空错误
+
+                        finally:
+                            # 回滚事务，恢复数据库状态
+                            mysql_connection.rollback()
+
+                        cursor.close()'''),
+                ("foreign_key_constraint", '''
+                    def test_foreign_key_constraint(mysql_connection):
+                        """测试外键约束"""
+                        cursor = mysql_connection.cursor()
+
+                        # 开始事务
+                        mysql_connection.start_transaction()
+
+                        try:
+                            # 1.插入一个有效的教师记录，Tid 为 '001'
+                            cursor.execute("""
+                                INSERT INTO Teacher (Tid, Tname, Tgender, Tbirthday, Tprof, Depart)
+                                VALUES ('001', '王五', '男', '1958-12-02', '副教授', '计算机系')
+                            """)
+
+                            # 2. 插入一个有效课程的记录，Tid 为 '001'
+                            cursor.execute("""
+                                INSERT INTO Course (Cid, Cname, Tid)
+                                VALUES ('1-001', '离散数学', '001')
+                            """)
+                            # 查询插入的数据
+                            cursor.execute("SELECT COUNT(*) FROM Course WHERE Cid = '1-001' AND Cname = '离散数学' AND Tid = '001'")
+                            count = cursor.fetchone()[0]
+
+                            # 验证数据是否成功插入
+                            assert count == 1
+
+                            # 3. 尝试插入一个不存在的 Tid（例如 '999'），应该抛出外键约束错误
+                            try:
+                                cursor.execute("""
+                                    INSERT INTO Course (Cid, Cname, Tid)
+                                    VALUES ('1-002', '英语', '999')
+                                """)
+                                pytest.fail("应该抛出错误，因为 Tid '999' 在 Teacher 表中不存在")
+                            except Error as e:
+                                assert "foreign key constraint fails" in str(e)  # 外键约束错误
+
+                        finally:
+                            # 回滚事务，恢复数据库状态
+                            mysql_connection.rollback()
+
+                        cursor.close()''')
+            ])
+            self.preset_constraint_test_conn.commit()
 
     def init_preset_transaction_test_db(self):
         """初始化 SQLite 数据库并创建表"""
@@ -478,6 +609,7 @@ class AddTestCaseDialog(QDialog):
         import mysql.connector
         import subprocess
         import os
+        from mysql.connector.errors import Error  # 导入Error异常类
 
         # 配置你的 MySQL 数据库连接信息
         MYSQL_CONFIG = {mysql_config_str}
